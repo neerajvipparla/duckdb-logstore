@@ -84,17 +84,28 @@ BoundStatement Binder::Bind(SQLStatement &statement) {
 	case StatementType::INSERT_STATEMENT:
 		return Bind(statement.Cast<InsertStatement>());
 	case StatementType::DELETE_STATEMENT:
-		return Bind(statement.Cast<DeleteStatement>());
+		throw BinderException("Append-only mode: DELETE is not permitted. This store is immutable after insert.");
 	case StatementType::UPDATE_STATEMENT:
-		return Bind(statement.Cast<UpdateStatement>());
+		throw BinderException("Append-only mode: UPDATE is not permitted. This store is immutable after insert.");
 	case StatementType::RELATION_STATEMENT:
 		return Bind(statement.Cast<RelationStatement>());
 	case StatementType::CREATE_STATEMENT:
 		return Bind(statement.Cast<CreateStatement>());
 	case StatementType::DROP_STATEMENT:
 		return Bind(statement.Cast<DropStatement>());
-	case StatementType::ALTER_STATEMENT:
-		return Bind(statement.Cast<AlterStatement>());
+	case StatementType::ALTER_STATEMENT: {
+		auto &alter_stmt = statement.Cast<AlterStatement>();
+		if (alter_stmt.info->type == AlterType::ALTER_TABLE) {
+			auto &tbl = alter_stmt.info->Cast<AlterTableInfo>();
+			if (tbl.alter_table_type == AlterTableType::REMOVE_COLUMN) {
+				throw BinderException("Append-only mode: REMOVE_COLUMN is not permitted.");
+			}
+			if (tbl.alter_table_type == AlterTableType::ALTER_COLUMN_TYPE) {
+				throw BinderException("Append-only mode: MODIFY_COLUMN is not permitted.");
+			}
+		}
+		return Bind(alter_stmt);
+	}
 	case StatementType::TRANSACTION_STATEMENT:
 		return Bind(statement.Cast<TransactionStatement>());
 	case StatementType::PRAGMA_STATEMENT:
@@ -128,7 +139,7 @@ BoundStatement Binder::Bind(SQLStatement &statement) {
 	case StatementType::UPDATE_EXTENSIONS_STATEMENT:
 		return Bind(statement.Cast<UpdateExtensionsStatement>());
 	case StatementType::MERGE_INTO_STATEMENT:
-		return Bind(statement.Cast<MergeIntoStatement>());
+		throw BinderException("Append-only mode: MERGE INTO is not permitted. This store is immutable after insert.");
 	case StatementType::CONNECT_STATEMENT:
 		return Bind(statement.Cast<ConnectStatement>());
 	case StatementType::DISCONNECT_STATEMENT:

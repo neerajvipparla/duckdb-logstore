@@ -1,0 +1,61 @@
+# name: test/sql/append_only/test_append_only.test
+# description: Verify append-only enforcement at the binder level
+# group: [append_only]
+
+statement ok
+CREATE TABLE events (id BIGINT, op VARCHAR, payload VARCHAR, ts TIMESTAMP);
+
+statement ok
+INSERT INTO events VALUES (1, 'INSERT', '{"email":"a@b.com"}', '2024-01-01 00:00:00');
+
+query IITT
+SELECT id, op, payload, ts FROM events;
+----
+1	INSERT	{"email":"a@b.com"}	2024-01-01 00:00:00
+
+# UPDATE must be rejected at bind time
+statement error
+UPDATE events SET op='DELETE' WHERE id=1;
+----
+<REGEX>:Binder Error:.*Append-only mode: UPDATE is not permitted.*
+
+# DELETE must be rejected at bind time
+statement error
+DELETE FROM events WHERE id=1;
+----
+<REGEX>:Binder Error:.*Append-only mode: DELETE is not permitted.*
+
+# ALTER TABLE DROP COLUMN must be rejected
+statement error
+ALTER TABLE events DROP COLUMN ts;
+----
+<REGEX>:Binder Error:.*Append-only mode: REMOVE_COLUMN is not permitted.*
+
+# ALTER TABLE ALTER COLUMN TYPE must be rejected
+statement error
+ALTER TABLE events ALTER COLUMN op TYPE INTEGER USING 0;
+----
+<REGEX>:Binder Error:.*Append-only mode: MODIFY_COLUMN is not permitted.*
+
+# MERGE INTO must be rejected
+statement ok
+CREATE TABLE src (id BIGINT, op VARCHAR);
+
+statement error
+MERGE INTO events USING src ON events.id = src.id WHEN MATCHED THEN UPDATE SET op = src.op;
+----
+<REGEX>:Binder Error:.*Append-only mode: MERGE INTO is not permitted.*
+
+# ADD COLUMN is allowed
+statement ok
+ALTER TABLE events ADD COLUMN lsn VARCHAR;
+
+# RENAME COLUMN is allowed
+statement ok
+ALTER TABLE events RENAME COLUMN lsn TO log_sequence_number;
+
+# Data is intact after allowed ALTER operations
+query I
+SELECT COUNT(*) FROM events;
+----
+1
