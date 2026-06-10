@@ -49,3 +49,44 @@ Please also refer to our [Build Guide](https://duckdb.org/docs/current/dev/build
 ## Support
 
 See the [Support Options](https://ducklabs.com/support/) page and the dedicated [`endoflife.date`](https://endoflife.date/duckdb) page.
+
+## Append-Only Mode
+
+This fork patches DuckDB to enforce **append-only semantics** at the binder level. Once a row is inserted, it cannot be mutated or removed — enforced inside the engine itself, not at the application layer.
+
+### What is blocked
+
+| Operation | Error |
+|---|---|
+| `UPDATE` | `Append-only mode: UPDATE is not permitted. This store is immutable after insert.` |
+| `DELETE` | `Append-only mode: DELETE is not permitted. This store is immutable after insert.` |
+| `MERGE INTO` | `Append-only mode: MERGE INTO is not permitted. This store is immutable after insert.` |
+| `ALTER TABLE ... DROP COLUMN` | `Append-only mode: REMOVE_COLUMN is not permitted.` |
+| `ALTER TABLE ... ALTER COLUMN TYPE` | `Append-only mode: MODIFY_COLUMN is not permitted.` |
+
+### What is still allowed
+
+`INSERT`, `SELECT`, `CREATE TABLE`, `DROP TABLE`, `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... RENAME COLUMN/TABLE` — all work normally.
+
+### How it works
+
+All five guards live in a single function: `Binder::Bind()` in `src/planner/binder.cpp`. The binder is the first stage that has full type and statement information, so the error is raised before any execution plan is produced — no storage or optimizer code is touched.
+
+### Using with Go
+
+The Go package (`github.com/marcboeker/go-duckdb`) compiles DuckDB from its amalgamation source via CGO. To use this append-only build:
+
+```bash
+# 1. Generate the amalgamation from this patched source
+make amalgamation
+
+# 2. Vendor the Go package and replace its amalgamation
+go mod vendor
+cp build/amalgamation/duckdb.cpp vendor/github.com/marcboeker/go-duckdb/duckdb.cpp
+cp build/amalgamation/duckdb.hpp vendor/github.com/marcboeker/go-duckdb/duckdb.hpp
+
+# 3. Build — the append-only engine is now statically linked into your binary
+go build ./...
+```
+
+No runtime download. The restrictions are baked into the compiled binary.
